@@ -1,6 +1,10 @@
 # Command Center
 
+[![Deploy](https://github.com/WCLogic/command-center/actions/workflows/deploy.yml/badge.svg)](https://github.com/WCLogic/command-center/actions/workflows/deploy.yml)
+
 Executive operations dashboard for Mr. Chase's business portfolio. Pulls data from a private Google Sheet via a Cloudflare Worker proxy and renders it as a dark-themed React SPA.
+
+**Live:** https://wclogic.github.io/command-center/
 
 ## Architecture
 
@@ -26,4 +30,6 @@ Executive operations dashboard for Mr. Chase's business portfolio. Pulls data fr
 
 ## Deploy
 
-See `worker/README.md` and `frontend/README.md`.
+**Frontend:** Automated via GitHub Actions on every push to `main` — see `.github/workflows/deploy.yml`. The workflow builds `frontend/` and force-pushes `dist/` to the `gh-pages` branch, which GitHub Pages serves at the live URL above.
+
+**Worker:** Manual — `cd worker && npx wrangler deploy`. See `worker/README.md`.
