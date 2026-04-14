@@ -76,9 +76,11 @@ function BusinessCard({ biz }) {
             <Building2 size={16} className="text-[#3b82f6]" />
           </div>
           <div className="min-w-0 flex-1">
-            <div className="font-semibold text-white">{biz.Business || biz.Entity || '—'}</div>
+            <div className="font-semibold text-white">
+              {biz['Business Name'] || biz.Business || biz.Entity || 'Unnamed'}
+            </div>
             <div className="text-xs text-[#9ca3af] mt-0.5">
-              {biz.Category || biz.Type || ''}
+              {biz.Category || biz['Entity Type'] || biz.Type || ''}
               {biz['Key Contact'] ? ` · ${biz['Key Contact']}` : ''}
             </div>
             <div className="flex items-center gap-2 mt-2 flex-wrap">
@@ -103,9 +105,15 @@ function BusinessCard({ biz }) {
 
       {open && (
         <div className="border-t border-[#1e1e2e] p-4 space-y-3 fade-in">
-          {Object.keys(biz).filter((k) => !k.startsWith('_') && !['Business','Entity','Category','Type','Key Contact','Status','Open Items','Notes'].includes(k) && biz[k]).map((k) => (
+          {Object.keys(biz).filter((k) => !k.startsWith('_') && !['Business','Business Name','Entity','Entity Type','Category','Type','Key Contact','Status','Open Items','Notes'].includes(k) && biz[k]).map((k) => (
             <Field key={k} label={k} value={biz[k]} />
           ))}
+          {biz['Entity Type'] && (
+            <Field label="Entity Type" value={biz['Entity Type']} />
+          )}
+          {biz['Key Contact'] && (
+            <Field label="Key Contact" value={biz['Key Contact']} />
+          )}
 
           {openItems.length > 0 && (
             <div>

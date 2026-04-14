@@ -68,7 +68,7 @@ export default function AgentRoster() {
               />
             </div>
             <div className="mt-2 font-semibold text-sm text-white truncate">
-              {a.Agent || a.Name || '—'}
+              {a['Agent Name'] || a.Agent || a.Name || '—'}
             </div>
             <div className="text-[11px] text-[#9ca3af] truncate">{a.Role || ''}</div>
           </button>
@@ -95,7 +95,7 @@ function AgentDrawer({ agent, onClose }) {
     ['Health', agent.Health, dot],
     ['Last Active', agent['Last Active']],
     ['Context File', agent['Context File']],
-    ['Security Policy Version', agent['Security Policy Version']],
+    ['Security Policy', agent['Security Policy'] || agent['Security Policy Version']],
     ['Last Audit', agent['Last Audit']],
     ['Audit Result', agent['Audit Result']],
     ['Health Notes', agent['Health Notes']],
@@ -145,6 +145,7 @@ function iconFor(k) {
     case 'Health':                  return <Activity size={11} />;
     case 'Last Active':             return <Clock size={11} />;
     case 'Context File':            return <FileText size={11} />;
+    case 'Security Policy':
     case 'Security Policy Version': return <Shield size={11} />;
     case 'Last Audit':
     case 'Audit Result':            return <FileCheck2 size={11} />;

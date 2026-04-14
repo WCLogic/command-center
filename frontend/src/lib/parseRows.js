@@ -6,7 +6,7 @@
  * checkbox columns on every row in the validated range, so we treat those
  * (and other no-info defaults) as empty for the purpose of row presence.
  */
-const EMPTY_DEFAULTS = new Set(['', 'FALSE', 'false']);
+const EMPTY_DEFAULTS = new Set(['', 'FALSE', 'false', '—', '-', 'N/A', 'n/a']);
 
 function isCellEmpty(c) {
   if (c == null) return true;
@@ -23,7 +23,9 @@ export function rowsToObjects(values) {
     if (!r || r.every(isCellEmpty)) continue;
     const obj = { _rowIndex: i + 1 }; // 1-based sheet row
     headers.forEach((h, j) => {
-      obj[h] = r[j] ?? '';
+      const cell = r[j];
+      // Normalize placeholder defaults to empty string so UI doesn't render them
+      obj[h] = isCellEmpty(cell) ? '' : cell;
     });
     rows.push(obj);
   }
