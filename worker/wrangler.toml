@@ -1,0 +1,12 @@
+name = "command-center-api"
+main = "src/index.js"
+compatibility_date = "2026-04-01"
+
+# SHEET_ID is a non-secret plain var
+[vars]
+SHEET_ID = "1IGTix-G39YllqcH7DEnX9NSsJrVHdBrt3TV1kSQkGBA"
+ALLOWED_ORIGIN = "https://wclogic.github.io"
+
+# Secrets set via:
+#   wrangler secret put GOOGLE_SERVICE_ACCOUNT
+# Paste the full service-account JSON when prompted.
