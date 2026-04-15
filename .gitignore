@@ -1,7 +1,9 @@
 # Secrets (NEVER COMMIT)
 .secrets/
 *.json.key
+*.secret
 service-account*.json
+command_center_token
 
 # Dependencies
 node_modules/

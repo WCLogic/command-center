@@ -1,5 +1,12 @@
 /**
- * Worker API client.
+ * Worker API client — READ-ONLY.
+ *
+ * As of 2026-04-14, the Command Center dashboard is read-only: it pulls from
+ * the Sheet via the Worker and displays it. All writes happen out-of-band,
+ * executed by the agent team (Scout, Billboard, EagleEye, Scrooge, Jarvis)
+ * using bearer-authenticated calls to the Worker. Write endpoints are never
+ * called from this bundle — embedding the token in a public asset is the
+ * exact exposure we are eliminating.
  *
  * VITE_API_URL must be set at build time (or via .env.local for dev).
  * Example: VITE_API_URL=https://command-center-api.willchasecreate.workers.dev
@@ -32,27 +39,6 @@ export const api = {
   getAllTabs() { return http('/all'); },
   getTab(tab) {
     return http('/?tab=' + encodeURIComponent(tab));
-  },
-  appendRow(tab, row) {
-    return http('/', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tab, mode: 'append', values: [row] }),
-    });
-  },
-  updateRange(tab, range, values) {
-    return http('/', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tab, mode: 'update', range, values }),
-    });
-  },
-  setCell(tab, row, col, value) {
-    return http('/cell', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tab, row, col, value }),
-    });
   },
 };
 

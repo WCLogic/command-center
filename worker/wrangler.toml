@@ -8,5 +8,16 @@ SHEET_ID = "1IGTix-G39YllqcH7DEnX9NSsJrVHdBrt3TV1kSQkGBA"
 ALLOWED_ORIGIN = "https://wclogic.github.io"
 
 # Secrets set via:
-#   wrangler secret put GOOGLE_SERVICE_ACCOUNT
-# Paste the full service-account JSON when prompted.
+#   wrangler secret put GOOGLE_SERVICE_ACCOUNT    (full service-account JSON)
+#   wrangler secret put COMMAND_CENTER_TOKEN      (256-bit bearer token, 2026-04-14)
+
+# --- Rate limiting (added 2026-04-14) ---
+# 30 requests per 60 seconds per client IP. Defense-in-depth on top of the
+# bearer auth gate. IP allow-list deferred — Mr. Chase is on a residential
+# (dynamic) Verizon IP; a hard allow-list would cause silent outages on every
+# ISP-driven IP change. Revisit once a Cloudflare Tunnel or static IP is in place.
+[[unsafe.bindings]]
+name = "RATE_LIMITER"
+type = "ratelimit"
+namespace_id = "1001"
+simple = { limit = 30, period = 60 }

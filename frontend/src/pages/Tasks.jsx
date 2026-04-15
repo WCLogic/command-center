@@ -1,11 +1,15 @@
 import React, { useMemo, useState } from 'react';
 import { useData, SHEET_TABS } from '../lib/data.jsx';
-import { colIndex } from '../lib/parseRows.js';
-import { api } from '../lib/api.js';
 import {
-  Plus, Filter as FilterIcon, ChevronDown, ChevronRight, AlertCircle,
-  CheckCircle2, Circle, Loader2,
+  Filter as FilterIcon, ChevronDown, ChevronRight, AlertCircle,
+  CheckCircle2, Circle,
 } from 'lucide-react';
+
+// NOTE (2026-04-14): Dashboard is READ-ONLY. Write capability (mark-complete,
+// quick-add) lived here previously but was removed as part of the Worker auth
+// remediation — embedding the bearer token in a public bundle is the exact
+// exposure we are closing. Task creation and completion now go through the
+// agent layer.
 
 const PRIORITY_RANK = { 'Critical': 0, 'High': 1, 'Medium': 2, 'Low': 3 };
 const PRIORITY_COLOR = {
@@ -22,10 +26,9 @@ const STATUSES = ['Active', 'In Progress', 'Blocked', 'Completed'];
 const TASKS_TAB = SHEET_TABS[2];
 
 export default function Tasks() {
-  const { tabs, refresh, patchRow, addRowLocal } = useData();
+  const { tabs } = useData();
   const tab = tabs[TASKS_TAB];
   const allTasks = tab?.rows || [];
-  const headers = tab?.headers || [];
 
   const [filters, setFilters] = useState({
     category: 'All',
@@ -35,7 +38,6 @@ export default function Tasks() {
   });
   const [sort, setSort] = useState('priority'); // priority | due
   const [showCompleted, setShowCompleted] = useState(false);
-  const [pending, setPending] = useState({});
 
   const filteredActive = useMemo(() => {
     return allTasks
@@ -64,40 +66,12 @@ export default function Tasks() {
     [allTasks]
   );
 
-  const completeTask = async (task) => {
-    const statusCol = colIndex(headers, 'Status');
-    if (statusCol < 0) return alert('Status column not found in sheet');
-    setPending((p) => ({ ...p, [task._rowIndex]: true }));
-    patchRow(TASKS_TAB, task._rowIndex, 'Status', 'Completed');
-    try {
-      await api.setCell(TASKS_TAB, task._rowIndex, statusCol, 'Completed');
-      // also stamp Completed Date if column exists
-      const completedDateCol = colIndex(headers, 'Completed Date');
-      if (completedDateCol > 0) {
-        await api.setCell(TASKS_TAB, task._rowIndex, completedDateCol, todayIso());
-      }
-      refresh();
-    } catch (e) {
-      patchRow(TASKS_TAB, task._rowIndex, 'Status', task.Status || 'Active');
-      alert('Failed to update: ' + e.message);
-    } finally {
-      setPending((p) => { const n = { ...p }; delete n[task._rowIndex]; return n; });
-    }
-  };
-
   return (
     <div className="space-y-4">
-      <QuickAdd headers={headers} onAdded={async (row) => {
-        addRowLocal(TASKS_TAB, row);
-        try {
-          // Build row in column order
-          const orderedValues = headers.map((h) => row[h] ?? '');
-          await api.appendRow(TASKS_TAB, orderedValues);
-          refresh();
-        } catch (e) {
-          alert('Failed to save task: ' + e.message);
-        }
-      }} />
+      <div className="panel px-4 py-2 text-[11px] text-[#9ca3af] flex items-center gap-2">
+        <AlertCircle size={12} className="text-[#6b7280]" />
+        Read-only view. Task writes are handled by the agent team.
+      </div>
 
       {/* Filters / sort */}
       <div className="panel p-3 flex flex-wrap items-center gap-2">
@@ -127,12 +101,7 @@ export default function Tasks() {
         ) : (
           <ul className="divide-y divide-[#1e1e2e]">
             {filteredActive.map((t) => (
-              <TaskRow
-                key={t._rowIndex}
-                task={t}
-                pending={!!pending[t._rowIndex]}
-                onComplete={() => completeTask(t)}
-              />
+              <TaskRow key={t._rowIndex} task={t} />
             ))}
           </ul>
         )}
@@ -163,25 +132,21 @@ export default function Tasks() {
   );
 }
 
-function TaskRow({ task, completed, pending, onComplete }) {
+function TaskRow({ task, completed }) {
   const dueDate = parseDate(task['Due Date']);
   const overdue = dueDate && dueDate < startOfToday() && !completed;
   const pColor = PRIORITY_COLOR[task.Priority] || '#6b7280';
 
   return (
     <li className={`flex items-start gap-3 px-4 py-3 ${overdue ? 'bg-[#ef4444]/5' : ''}`}>
-      <button
-        onClick={completed ? undefined : onComplete}
-        disabled={completed || pending}
+      <div
         className="mt-0.5 flex-shrink-0"
-        title={completed ? 'Completed' : 'Mark complete'}
+        title={completed ? 'Completed' : 'Active (read-only)'}
       >
-        {pending
-          ? <Loader2 size={18} className="animate-spin text-[#3b82f6]" />
-          : completed
-            ? <CheckCircle2 size={18} className="text-[#22c55e]" />
-            : <Circle size={18} className="text-[#6b7280] hover:text-[#3b82f6]" />}
-      </button>
+        {completed
+          ? <CheckCircle2 size={18} className="text-[#22c55e]" />
+          : <Circle size={18} className="text-[#6b7280]" />}
+      </div>
       <div className="flex-1 min-w-0">
         <div className={`text-sm ${completed ? 'line-through text-[#6b7280]' : 'text-[#e5e7eb]'} truncate`}>
           {task.Task || task.Title || task.Description || '(untitled)'}
@@ -209,53 +174,6 @@ function TaskRow({ task, completed, pending, onComplete }) {
   );
 }
 
-function QuickAdd({ headers, onAdded }) {
-  const [text, setText] = useState('');
-  const [category, setCategory] = useState('Personal');
-  const [priority, setPriority] = useState('Medium');
-  const [assignee, setAssignee] = useState('Mr. Chase');
-
-  const submit = (e) => {
-    e.preventDefault();
-    if (!text.trim()) return;
-    const row = {
-      'Task': text.trim(),
-      'Title': text.trim(),
-      'Category': category,
-      'Priority': priority,
-      'Assigned To': assignee,
-      'Status': 'Active',
-      'Created Date': todayIso(),
-    };
-    // Generate ID if column exists
-    if (headers.includes('ID')) row['ID'] = 'T-' + Date.now().toString(36).toUpperCase();
-    setText('');
-    onAdded(row);
-  };
-
-  return (
-    <form onSubmit={submit} className="panel p-3 flex flex-wrap gap-2 items-center">
-      <Plus size={16} className="text-[#3b82f6]" />
-      <input
-        className="input flex-1 min-w-[200px]"
-        placeholder="Add a task and press Enter…"
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-      />
-      <select className="input" value={category} onChange={(e) => setCategory(e.target.value)}>
-        {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
-      </select>
-      <select className="input" value={priority} onChange={(e) => setPriority(e.target.value)}>
-        {PRIORITIES.map((c) => <option key={c} value={c}>{c}</option>)}
-      </select>
-      <select className="input" value={assignee} onChange={(e) => setAssignee(e.target.value)}>
-        {ASSIGNEES.map((c) => <option key={c} value={c}>{c}</option>)}
-      </select>
-      <button type="submit" className="btn btn-primary" disabled={!text.trim()}>Add</button>
-    </form>
-  );
-}
-
 function Select({ label, value, onChange, options }) {
   return (
     <label className="flex items-center gap-2 text-xs text-[#9ca3af]">
@@ -276,11 +194,4 @@ function startOfToday() {
   const d = new Date();
   d.setHours(0, 0, 0, 0);
   return d;
-}
-function todayIso() {
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${dd}`;
 }

@@ -10,8 +10,17 @@
  *   POST /                               -> body: { tab, range?, values, mode: 'append'|'update' }
  *   POST /cell                           -> body: { tab, row, col, value }   (1-based row/col)
  *
+ * Auth (added 2026-04-14):
+ *   All mutating methods (POST/PUT/PATCH/DELETE) require:
+ *     Authorization: Bearer <COMMAND_CENTER_TOKEN>
+ *   GET and OPTIONS are public (Sheet is already private; reads proxy through
+ *   service account; dashboard origin is locked via CORS).
+ *   Constant-time compare. Log events: auth_missing / auth_invalid / auth_ok.
+ *   Token value is never serialized into a log line.
+ *
  * Env:
  *   GOOGLE_SERVICE_ACCOUNT  (secret)  Full service-account JSON as a string
+ *   COMMAND_CENTER_TOKEN    (secret)  Bearer token for mutating requests
  *   SHEET_ID                (var)     The target spreadsheet ID
  *   ALLOWED_ORIGIN          (var)     CORS origin (https://wclogic.github.io)
  */
@@ -21,12 +30,24 @@ const TOKEN_CACHE = { token: null, exp: 0 };
 // ---------- CORS ----------
 function corsHeaders(env) {
   return {
-    'Access-Control-Allow-Origin': env.ALLOWED_ORIGIN || '*',
+    'Access-Control-Allow-Origin': env.ALLOWED_ORIGIN || 'https://wclogic.github.io',
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Headers': 'Authorization, Content-Type',
     'Access-Control-Max-Age': '86400',
     'Vary': 'Origin',
   };
+}
+
+// ---------- Auth ----------
+// Constant-time string compare. Never replace with ===.
+function constantTimeEqual(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string') return false;
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) {
+    diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  }
+  return diff === 0;
 }
 
 function json(data, env, status = 200) {
@@ -231,10 +252,52 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
-    // Preflight
+    // Preflight — always open so the browser can negotiate CORS before the auth gate fires.
     if (request.method === 'OPTIONS') {
       return new Response(null, { status: 204, headers: corsHeaders(env) });
     }
+
+    // --- RATE LIMIT (added 2026-04-14) ---
+    // 30 requests per 60 seconds per client IP (binding in wrangler.toml).
+    // Applied before auth so unauthenticated probes don't consume auth compute.
+    // Skips if the binding isn't available at runtime (defensive: never brick the Worker).
+    const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
+    if (env.RATE_LIMITER && typeof env.RATE_LIMITER.limit === 'function') {
+      try {
+        const { success } = await env.RATE_LIMITER.limit({ key: ip });
+        if (!success) {
+          console.log(JSON.stringify({ evt: 'rate_limited', ip, method: request.method, path: url.pathname, ts: Date.now() }));
+          return new Response('Too Many Requests', {
+            status: 429,
+            headers: { ...corsHeaders(env), 'Retry-After': '60' },
+          });
+        }
+      } catch (e) {
+        // Rate limiter error — fail open but log. The auth gate is still in place.
+        console.log(JSON.stringify({ evt: 'rate_limiter_error', msg: String(e && e.message || e), ts: Date.now() }));
+      }
+    }
+
+    // --- AUTH GATE (added 2026-04-14) ---
+    // Mutating methods require a bearer token. GETs stay public (Sheet is private;
+    // reads proxy through service account; dashboard origin is locked via CORS).
+    const MUTATING_METHODS = ['POST', 'PUT', 'PATCH', 'DELETE'];
+    if (MUTATING_METHODS.includes(request.method)) {
+      const authHeader = request.headers.get('Authorization') || '';
+      const provided = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
+      const expected = env.COMMAND_CENTER_TOKEN;
+
+      if (!provided) {
+        console.log(JSON.stringify({ evt: 'auth_missing', ip, method: request.method, path: url.pathname, ts: Date.now() }));
+        return new Response('Unauthorized', { status: 401, headers: corsHeaders(env) });
+      }
+      if (!expected || !constantTimeEqual(provided, expected)) {
+        console.log(JSON.stringify({ evt: 'auth_invalid', ip, method: request.method, path: url.pathname, ts: Date.now() }));
+        return new Response('Forbidden', { status: 403, headers: corsHeaders(env) });
+      }
+      console.log(JSON.stringify({ evt: 'auth_ok', ip, method: request.method, path: url.pathname, ts: Date.now() }));
+    }
+    // --- END AUTH GATE ---
 
     try {
       // GET /health
