@@ -1,41 +1,46 @@
 import React from 'react';
-import { Lock, DollarSign, BarChart3, Wallet, TrendingUp, Briefcase } from 'lucide-react';
+import { Lock } from 'lucide-react';
 
+/**
+ * Finances — locked placeholder.
+ *
+ * Pending Scrooge onboarding (COMMAND_CENTER_SPEC.md §3.5). Rendered in a
+ * muted state so it is clearly inactive but still shows what will live here.
+ */
 export default function Finances() {
-  const planned = [
-    { icon: Wallet,     label: 'Salary tracking' },
-    { icon: BarChart3,  label: 'Budgeting' },
-    { icon: TrendingUp, label: 'Investment analysis' },
-    { icon: DollarSign, label: 'Cash flow' },
-    { icon: Briefcase,  label: 'Long-term planning' },
-  ];
-
   return (
-    <div className="max-w-3xl mx-auto">
-      <div className="panel p-8 md:p-10 text-center">
-        <div className="w-14 h-14 mx-auto rounded-full bg-[#1a1a24] border border-[#1e1e2e] flex items-center justify-center">
-          <Lock size={22} className="text-[#6b7280]" />
+    <div className="space-y-4">
+      <SectionHeader
+        title="Finances"
+        subtitle="Locked — pending Scrooge onboarding"
+      />
+
+      <div className="panel p-10 md:p-14 text-center opacity-80">
+        <div className="w-12 h-12 mx-auto rounded-full bg-[#18181b] border border-[#27272a] flex items-center justify-center">
+          <Lock size={18} className="text-[#71717a]" />
         </div>
-        <h2 className="mt-4 text-xl font-semibold text-white">Finances — Pending Scrooge Onboarding</h2>
-        <p className="mt-2 text-sm text-[#9ca3af] max-w-xl mx-auto">
-          This section will contain interactive financial dashboards including salary tracking, budgeting,
-          investment analysis, cash flow, and planning. Locked until Scrooge is online and the data sources are wired.
+        <h2 className="mt-4 text-[15px] font-semibold text-[#a1a1aa]">
+          Pending Scrooge onboarding
+        </h2>
+        <p className="mt-2 text-[13px] text-[#71717a] max-w-md mx-auto">
+          Financial dashboards — salary, budget, investments, cash flow — come online
+          once Scrooge is fully onboarded and data sources are wired.
         </p>
 
-        <div className="mt-6 grid grid-cols-2 md:grid-cols-5 gap-3">
-          {planned.map(({ icon: Icon, label }) => (
-            <div key={label} className="panel-2 p-3 opacity-60">
-              <Icon size={18} className="mx-auto text-[#6b7280]" />
-              <div className="mt-2 text-xs text-[#9ca3af]">{label}</div>
-            </div>
-          ))}
-        </div>
-
-        <div className="mt-8 inline-flex items-center gap-2 text-[11px] uppercase tracking-wider text-[#6b7280] panel-2 px-3 py-1.5">
-          <span className="w-1.5 h-1.5 rounded-full bg-[#eab308] animate-pulse" />
-          Coming soon
+        <div className="mt-8 inline-flex items-center gap-2 text-[10px] uppercase tracking-wider text-[#71717a]">
+          <span className="w-1 h-1 rounded-full bg-[#71717a]" />
+          Inactive
         </div>
       </div>
+    </div>
+  );
+}
+
+function SectionHeader({ title, subtitle }) {
+  return (
+    <div>
+      <h1 className="text-lg font-semibold text-[#fafafa] tracking-tight">{title}</h1>
+      {subtitle && <p className="text-[12px] text-[#71717a] mt-0.5">{subtitle}</p>}
     </div>
   );
 }

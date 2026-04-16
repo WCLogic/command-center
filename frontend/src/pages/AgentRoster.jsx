@@ -1,154 +1,221 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useData, SHEET_TABS } from '../lib/data.jsx';
-import { Crown, Bot, X, Activity, FileText, Shield, Clock, FileCheck2 } from 'lucide-react';
+import { X, Activity, FileText, Shield, Clock, FileCheck2, ChevronDown, ChevronRight } from 'lucide-react';
+import OrgChart from '../components/OrgChart.jsx';
 
+/**
+ * Agent Roster — hierarchical org chart + per-agent detail cards.
+ *
+ * Org chart is fixed (5 primary agents + Nolan as Billboard's sub-agent).
+ * Detail cards expand inline for any agent present in the Sheet.
+ */
 const HEALTH_COLOR = {
-  'Healthy': '#22c55e',
-  'Active':  '#22c55e',
-  'OK':      '#22c55e',
-  'Green':   '#22c55e',
-  'Degraded':'#eab308',
-  'Warning': '#eab308',
-  'Yellow':  '#eab308',
-  'Down':    '#ef4444',
-  'Critical':'#ef4444',
-  'Red':     '#ef4444',
+  Healthy: '#22c55e',
+  Active:  '#22c55e',
+  OK:      '#22c55e',
+  Green:   '#22c55e',
+  Degraded:'#eab308',
+  Warning: '#eab308',
+  Yellow:  '#eab308',
+  Error:   '#ef4444',
+  Critical:'#ef4444',
+  Red:     '#ef4444',
+  Offline: '#71717a',
+  Idle:    '#71717a',
 };
 
-function healthDot(h) {
-  return HEALTH_COLOR[String(h || '').trim()] || '#6b7280';
+function healthColor(v) {
+  return HEALTH_COLOR[String(v || '').trim()] || '#71717a';
 }
 
 export default function AgentRoster() {
   const { tabs } = useData();
   const tab = tabs[SHEET_TABS[3]];
   const agents = tab?.rows || [];
-  const [selected, setSelected] = useState(null);
+
+  const agentByName = useMemo(() => {
+    const map = {};
+    agents.forEach((a) => {
+      const name = a['Agent Name'];
+      if (name) map[name] = a;
+    });
+    return map;
+  }, [agents]);
+
+  const [drawerAgent, setDrawerAgent] = useState(null);
 
   return (
     <div className="space-y-6">
-      {/* Mr. Chase node */}
-      <div className="flex justify-center">
-        <div className="panel p-4 w-64 text-center border-[#3b82f6]/40">
-          <div className="w-12 h-12 mx-auto rounded-full bg-[#3b82f6]/15 border border-[#3b82f6]/40 flex items-center justify-center">
-            <Crown size={20} className="text-[#3b82f6]" />
+      <SectionHeader
+        title="Agent Roster"
+        subtitle="Operational team — hierarchy, status, and audit results"
+      />
+
+      {/* Org chart */}
+      <div className="panel p-4 md:p-6">
+        <OrgChart agentByName={agentByName} onSelect={setDrawerAgent} />
+      </div>
+
+      {/* Detail cards */}
+      <div className="space-y-2">
+        <div className="text-[11px] uppercase tracking-wider text-[#71717a] px-1">
+          Details
+        </div>
+        {agents.length === 0 ? (
+          <div className="panel p-10 text-center text-[#a1a1aa] text-sm">
+            No agents in roster yet.
           </div>
-          <div className="mt-2 font-semibold text-white">Mr. Chase</div>
-          <div className="text-xs text-[#9ca3af]">Principal</div>
-        </div>
+        ) : (
+          <div className="space-y-2">
+            {agents.map((a) => (
+              <AgentDetailCard key={a._rowIndex} agent={a} />
+            ))}
+          </div>
+        )}
       </div>
 
-      {/* Connector lines */}
-      {agents.length > 0 && (
-        <div className="hidden md:flex justify-center">
-          <svg width="100%" height="40" viewBox="0 0 800 40" preserveAspectRatio="none" className="max-w-4xl">
-            <line x1="400" y1="0" x2="400" y2="20" stroke="#1e1e2e" strokeWidth="2" />
-            <line x1="80" y1="20" x2="720" y2="20" stroke="#1e1e2e" strokeWidth="2" />
-            {agents.map((_, i) => {
-              const x = 80 + ((720 - 80) * i) / Math.max(agents.length - 1, 1);
-              return <line key={i} x1={x} y1="20" x2={x} y2="40" stroke="#1e1e2e" strokeWidth="2" />;
-            })}
-          </svg>
+      {drawerAgent && (
+        <AgentDrawer agent={drawerAgent} onClose={() => setDrawerAgent(null)} />
+      )}
+    </div>
+  );
+}
+
+function SectionHeader({ title, subtitle }) {
+  return (
+    <div>
+      <h1 className="text-lg font-semibold text-[#fafafa] tracking-tight">{title}</h1>
+      {subtitle && <p className="text-[12px] text-[#71717a] mt-0.5">{subtitle}</p>}
+    </div>
+  );
+}
+
+function AgentDetailCard({ agent }) {
+  const [open, setOpen] = useState(false);
+  const dot = healthColor(agent.Health || agent.Status);
+  const name = agent['Agent Name'] || '—';
+  const role = agent.Role || '—';
+
+  return (
+    <div className="panel overflow-hidden">
+      <button
+        onClick={() => setOpen(!open)}
+        className="w-full px-4 py-3 flex items-center justify-between gap-3 hover:bg-[#1f1f23] transition text-left"
+      >
+        <div className="flex items-center gap-3 min-w-0">
+          <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: dot }} />
+          <div className="min-w-0">
+            <div className="text-[13px] font-semibold text-[#fafafa] truncate">{name}</div>
+            <div className="text-[11px] text-[#71717a] uppercase tracking-wider truncate">{role}</div>
+          </div>
+        </div>
+        <div className="flex items-center gap-4 flex-shrink-0">
+          {agent.Status && (
+            <span className="text-[11px] text-[#a1a1aa] hidden sm:inline">{agent.Status}</span>
+          )}
+          <span className="text-[#71717a]">
+            {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+          </span>
+        </div>
+      </button>
+      {open && (
+        <div className="border-t border-[#27272a] px-4 py-4 grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-3 fade-in">
+          {agent['Current Assignment'] && (
+            <Field label="Current Assignment" value={agent['Current Assignment']} icon={FileText} />
+          )}
+          {agent.Health && (
+            <Field label="Health" value={agent.Health} icon={Activity} color={healthColor(agent.Health)} />
+          )}
+          {agent['Last Active'] && (
+            <Field label="Last Active" value={agent['Last Active']} icon={Clock} />
+          )}
+          {agent['Last Audit'] && (
+            <Field label="Last Audit" value={agent['Last Audit']} icon={FileCheck2} />
+          )}
+          {agent['Audit Result'] && (
+            <Field label="Audit Result" value={agent['Audit Result']} icon={FileCheck2} />
+          )}
+          {agent['Security Policy'] && (
+            <Field label="Security Policy" value={agent['Security Policy']} icon={Shield} />
+          )}
+          {agent['Health Notes'] && (
+            <div className="md:col-span-2">
+              <FieldLabel label="Health Notes" />
+              <div className="panel-sub p-3 mt-1 text-[13px] text-[#fafafa] whitespace-pre-wrap">
+                {agent['Health Notes']}
+              </div>
+            </div>
+          )}
         </div>
       )}
+    </div>
+  );
+}
 
-      {/* Agent grid */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
-        {agents.map((a) => (
-          <button
-            key={a._rowIndex}
-            onClick={() => setSelected(a)}
-            className="panel p-4 text-center hover:border-[#3b82f6]/40 transition cursor-pointer"
-          >
-            <div className="relative w-12 h-12 mx-auto rounded-full bg-[#1a1a24] border border-[#1e1e2e] flex items-center justify-center">
-              <Bot size={20} className="text-[#9ca3af]" />
-              <span
-                className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full border-2 border-[#12121a]"
-                style={{ background: healthDot(a.Health || a.Status) }}
-              />
-            </div>
-            <div className="mt-2 font-semibold text-sm text-white truncate">
-              {a['Agent Name'] || a.Agent || a.Name || '—'}
-            </div>
-            <div className="text-[11px] text-[#9ca3af] truncate">{a.Role || ''}</div>
-          </button>
-        ))}
+function Field({ label, value, icon: Icon, color }) {
+  return (
+    <div>
+      <FieldLabel label={label} icon={Icon} />
+      <div
+        className="text-[13px] mt-0.5 break-words"
+        style={{ color: color || '#fafafa' }}
+      >
+        {String(value)}
       </div>
+    </div>
+  );
+}
 
-      {agents.length === 0 && (
-        <div className="panel p-10 text-center text-[#9ca3af] text-sm">
-          No agents in roster yet.
-        </div>
-      )}
-
-      {selected && <AgentDrawer agent={selected} onClose={() => setSelected(null)} />}
+function FieldLabel({ label, icon: Icon }) {
+  return (
+    <div className="text-[10px] uppercase tracking-wider text-[#71717a] flex items-center gap-1">
+      {Icon && <Icon size={10} />} {label}
     </div>
   );
 }
 
 function AgentDrawer({ agent, onClose }) {
-  const dot = healthDot(agent.Health || agent.Status);
+  const dot = healthColor(agent.Health || agent.Status);
   const pairs = [
     ['Role', agent.Role],
-    ['Current Assignment', agent['Current Assignment'] || agent.Assignment],
+    ['Reports To', agent['Reports To']],
     ['Status', agent.Status],
-    ['Health', agent.Health, dot],
+    ['Health', agent.Health],
+    ['Current Assignment', agent['Current Assignment']],
     ['Last Active', agent['Last Active']],
     ['Context File', agent['Context File']],
-    ['Security Policy', agent['Security Policy'] || agent['Security Policy Version']],
+    ['Security Policy', agent['Security Policy']],
     ['Last Audit', agent['Last Audit']],
     ['Audit Result', agent['Audit Result']],
     ['Health Notes', agent['Health Notes']],
   ];
-
   return (
     <div className="fixed inset-0 z-50 flex justify-end" onClick={onClose}>
       <div className="absolute inset-0 bg-black/60" />
       <div
-        className="relative w-full max-w-md h-full bg-[#12121a] border-l border-[#1e1e2e] overflow-y-auto fade-in"
+        className="relative w-full max-w-md h-full bg-[#18181b] border-l border-[#27272a] overflow-y-auto fade-in"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="sticky top-0 z-10 flex items-center justify-between px-4 h-12 border-b border-[#1e1e2e] bg-[#0f0f17]">
+        <div className="sticky top-0 z-10 flex items-center justify-between px-4 h-12 border-b border-[#27272a] bg-[#18181b]">
           <div className="flex items-center gap-2">
-            <span className="w-2.5 h-2.5 rounded-full" style={{ background: dot }} />
-            <div className="text-sm font-semibold">{agent.Agent || agent.Name}</div>
+            <span className="w-1.5 h-1.5 rounded-full" style={{ background: dot }} />
+            <div className="text-sm font-semibold text-[#fafafa]">
+              {agent['Agent Name'] || 'Agent'}
+            </div>
           </div>
-          <button className="text-[#9ca3af] hover:text-white" onClick={onClose}>
-            <X size={18} />
+          <button className="btn btn-ghost" onClick={onClose} aria-label="Close">
+            <X size={16} />
           </button>
         </div>
         <div className="p-4 space-y-3">
-          {pairs.map(([k, v, color]) => v ? (
+          {pairs.map(([k, v]) => v ? (
             <div key={k}>
-              <div className="text-[10px] uppercase tracking-wider text-[#6b7280] flex items-center gap-1">
-                {iconFor(k)} {k}
-              </div>
-              <div
-                className="text-sm mt-0.5 break-words"
-                style={color ? { color } : undefined}
-              >
-                {String(v)}
-              </div>
+              <div className="text-[10px] uppercase tracking-wider text-[#71717a]">{k}</div>
+              <div className="text-[13px] text-[#fafafa] mt-0.5 break-words">{String(v)}</div>
             </div>
           ) : null)}
         </div>
       </div>
     </div>
   );
-}
-
-function iconFor(k) {
-  switch (k) {
-    case 'Role':                    return <Bot size={11} />;
-    case 'Current Assignment':      return <FileText size={11} />;
-    case 'Status':
-    case 'Health':                  return <Activity size={11} />;
-    case 'Last Active':             return <Clock size={11} />;
-    case 'Context File':            return <FileText size={11} />;
-    case 'Security Policy':
-    case 'Security Policy Version': return <Shield size={11} />;
-    case 'Last Audit':
-    case 'Audit Result':            return <FileCheck2 size={11} />;
-    default:                        return null;
-  }
 }
