@@ -7,7 +7,7 @@
  * Endpoints:
  *   GET  /?tab=<tabName>                 -> reads entire tab, returns values array
  *   GET  /all                            -> reads all 5 known tabs in one call
- *   POST /                               -> body: { tab, range?, values, mode: 'append'|'update' }
+ *   POST /                               -> body: { tab, range?, values, action|mode: 'append'|'update' }
  *   POST /cell                           -> body: { tab, row, col, value }   (1-based row/col)
  *
  * Auth (added 2026-04-14):
@@ -327,14 +327,15 @@ export default {
         return json({ tab, values: data.values || [] }, env);
       }
 
-      // POST /   body: { tab, values, mode: 'append', range? }
-      //         or { tab, range, values, mode: 'update' }
+      // POST /   body: { tab, values, action|mode: 'append', range? }
+      //         or { tab, range, values, action|mode: 'update' }
+      //   "action" is the preferred field name; "mode" is accepted for back-compat.
       if (request.method === 'POST' && url.pathname === '/') {
         const body = await request.json();
         if (!body.tab || !body.values) {
           return errorJson('Missing tab or values', env, 400);
         }
-        const mode = body.mode || 'append';
+        const mode = body.action || body.mode || 'append';
         if (mode === 'append') {
           const result = await sheetsAppend(env, token, body.tab, body.values);
           return json({ ok: true, result }, env);
