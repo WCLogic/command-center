@@ -2,6 +2,26 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <!--
+      Content Security Policy — interim hardening while the dashboard uses
+      sessionStorage token auth. Long-term plan migrates to Cloudflare Access
+      with SSO; see ~/Agents/Jarvis/CLOUDFLARE_ACCESS_MIGRATION_SPEC.md.
+
+      Notes:
+        - script-src 'self' — Vite production build emits only same-origin
+          module scripts. No inline scripts.
+        - style-src allows 'unsafe-inline' because Tailwind v4 injects
+          inline style tags for @property definitions and hashed atomic CSS.
+        - connect-src pinned to the Worker origin.
+        - img-src includes data: for the inline SVG favicon below.
+        - frame-ancestors in a meta tag is ignored by browsers (header-only);
+          we rely on the JS frame-bust at the bottom as the actual guard.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' https://command-center-api.willchasecreate.workers.dev; img-src 'self' data:; font-src 'self'; base-uri 'self'; form-action 'none'; object-src 'none'; frame-ancestors 'none'"
+    />
+    <meta name="referrer" content="no-referrer" />
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%233b82f6'%3E%3Cpath d='M12 2 3 7v6c0 5 4 9 9 9s9-4 9-9V7l-9-5z'/%3E%3C/svg%3E" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#09090b" />
