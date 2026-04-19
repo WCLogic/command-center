@@ -6,8 +6,8 @@
  *
  * Endpoints:
  *   GET  /?tab=<tabName>                 -> reads entire tab, returns values array
- *   GET  /all                            -> reads all 5 known tabs in one call
- *   POST /                               -> body: { tab, range?, values, action|mode: 'append'|'update' }
+ *   GET  /all                            -> reads all known tabs in one call
+ *   POST /                               -> body: { tab, range?, values, action|mode: 'append'|'update', appendRange? }
  *   POST /cell                           -> body: { tab, row, col, value }   (1-based row/col)
  *
  * Auth (added 2026-04-14):
@@ -17,6 +17,14 @@
  *   service account; dashboard origin is locked via CORS).
  *   Constant-time compare. Log events: auth_missing / auth_invalid / auth_ok.
  *   Token value is never serialized into a log line.
+ *
+ * Append bounded-range fix (added 2026-04-19, per EagleEye review conditions 1-8):
+ *   - Caller passes appendRange (e.g. "A:A") to narrow Google's table detection.
+ *   - Server-side fail-closed required-set on critical tabs — omission returns 400.
+ *   - appendRange is regex-validated before URL concatenation.
+ *   - Tab parameter is allow-listed against KNOWN_TABS on every endpoint.
+ *   - Drift detector: pre-append GET of anchor, post-append parse of target;
+ *     emits append_ok log with both rows, emits append_drift if deviation > 0.
  *
  * Env:
  *   GOOGLE_SERVICE_ACCOUNT  (secret)  Full service-account JSON as a string
@@ -154,14 +162,58 @@ async function getAccessToken(env) {
   return data.access_token;
 }
 
-// ---------- Sheets API ----------
+// ---------- Tabs + input validation (hardened 2026-04-19) ----------
+
+// Allow-list of legal tab names. Any `tab` parameter outside this set is rejected
+// with 400 on every endpoint. Closes a latent tab-injection surface on the
+// existing `tab` field — EagleEye finding from 2026-04-19 review.
 const KNOWN_TABS = [
   'Leads & Outreach',
   'Family Businesses',
   'Tasks & To-Dos',
   'Agent Roster',
   'Finances',
+  'Existing Client Reqs',
 ];
+const KNOWN_TABS_SET = new Set(KNOWN_TABS);
+
+// Fail-closed list. Append requests to these tabs MUST include a valid
+// appendRange, or the request is rejected. Other tabs retain back-compat
+// (tab-only append) until they accumulate formula spills of their own.
+const TAB_APPEND_RANGE_REQUIRED = new Set([
+  'Leads & Outreach',
+  'Existing Client Reqs',
+]);
+
+// A1 range syntax allow-list. Examples of accepted forms:
+//   "A"         single column
+//   "A:A"       single full column
+//   "A:C"       column range
+//   "A2"        single cell
+//   "A2:C"      partial range
+//   "A2:C10"    full range
+// Rejects anything else (e.g. cross-sheet refs "Sheet!A1", injection attempts
+// with special chars, named ranges, empty strings).
+const APPEND_RANGE_REGEX = /^[A-Z]{1,3}(\d+)?(:[A-Z]{1,3}(\d+)?)?$/;
+
+function isValidAppendRange(s) {
+  return typeof s === 'string' && APPEND_RANGE_REGEX.test(s);
+}
+
+function isKnownTab(s) {
+  return typeof s === 'string' && KNOWN_TABS_SET.has(s);
+}
+
+// Parse the row number out of Google's `updatedRange` response string.
+// updatedRange looks like: "'Leads & Outreach'!A33:W33" or "Tasks & To-Dos!A5:Q5".
+// Returns the first row number found, or null on parse failure.
+function parseTargetRow(updatedRange) {
+  if (typeof updatedRange !== 'string') return null;
+  const m = /![A-Z]+(\d+)(?::|$)/.exec(updatedRange);
+  return m ? parseInt(m[1], 10) : null;
+}
+
+// ---------- Sheets API ----------
 
 async function sheetsGetValues(env, token, tab) {
   const range = encodeURIComponent(tab);
@@ -193,8 +245,38 @@ async function sheetsBatchGet(env, token, tabs) {
   return await res.json();
 }
 
-async function sheetsAppend(env, token, tab, values) {
-  const range = encodeURIComponent(tab);
+// Probe the last populated row in a specific range within a tab.
+// Used by the drift detector as the "expected anchor" baseline.
+// Returns 0 if the range is empty, null if the probe fails (soft fail —
+// the append proceeds and drift detection logs a probe_failed event).
+async function sheetsLastPopulatedRow(env, token, tab, rangeA1) {
+  const fullRange = encodeURIComponent(tab + '!' + rangeA1);
+  const url =
+    'https://sheets.googleapis.com/v4/spreadsheets/' + env.SHEET_ID +
+    '/values/' + fullRange;
+  let res;
+  try {
+    res = await fetch(url, { headers: { Authorization: 'Bearer ' + token } });
+  } catch (e) {
+    return null;
+  }
+  if (!res.ok) return null;
+  const data = await res.json();
+  const vals = data.values || [];
+  // Walk backward through the rows; return the 1-based row number of the
+  // last row that has any non-empty cell.
+  for (let i = vals.length - 1; i >= 0; i--) {
+    const row = vals[i];
+    if (row && row.some((v) => v !== null && v !== undefined && v !== '')) {
+      return i + 1;
+    }
+  }
+  return 0;
+}
+
+async function sheetsAppend(env, token, tab, values, appendRange) {
+  const rangeStr = appendRange ? (tab + '!' + appendRange) : tab;
+  const range = encodeURIComponent(rangeStr);
   const url =
     'https://sheets.googleapis.com/v4/spreadsheets/' + env.SHEET_ID +
     '/values/' + range + ':append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS';
@@ -323,21 +405,84 @@ export default {
         if (!tab) {
           return errorJson('Missing tab query parameter', env, 400);
         }
+        if (!isKnownTab(tab)) {
+          return errorJson('Unknown tab: ' + tab, env, 400);
+        }
         const data = await sheetsGetValues(env, token, tab);
         return json({ tab, values: data.values || [] }, env);
       }
 
-      // POST /   body: { tab, values, action|mode: 'append', range? }
-      //         or { tab, range, values, action|mode: 'update' }
+      // POST /   body: { tab, values, action|mode, appendRange?, range? }
       //   "action" is the preferred field name; "mode" is accepted for back-compat.
+      //   appendRange: required for TAB_APPEND_RANGE_REQUIRED tabs on action=append.
       if (request.method === 'POST' && url.pathname === '/') {
         const body = await request.json();
         if (!body.tab || !body.values) {
           return errorJson('Missing tab or values', env, 400);
         }
+        if (!isKnownTab(body.tab)) {
+          return errorJson('Unknown tab: ' + body.tab, env, 400);
+        }
         const mode = body.action || body.mode || 'append';
+
         if (mode === 'append') {
-          const result = await sheetsAppend(env, token, body.tab, body.values);
+          // --- appendRange validation (fail-closed on required tabs) ---
+          if (TAB_APPEND_RANGE_REQUIRED.has(body.tab) && !body.appendRange) {
+            return errorJson('appendRange required for tab ' + body.tab, env, 400);
+          }
+          if (body.appendRange !== undefined && body.appendRange !== null) {
+            if (!isValidAppendRange(body.appendRange)) {
+              return errorJson('Invalid appendRange syntax', env, 400);
+            }
+          }
+
+          // --- Drift detector (v1 per EagleEye condition 3, 8) ---
+          // Pre-probe: find the last populated row in the appendRange column.
+          // Post-append: parse the target row from Google's updatedRange.
+          // Emit append_ok on every bounded append with both rows; emit
+          // append_drift if target_row > expected_target_row.
+          let anchorRow = null;
+          if (body.appendRange) {
+            anchorRow = await sheetsLastPopulatedRow(env, token, body.tab, body.appendRange);
+            if (anchorRow === null) {
+              console.log(JSON.stringify({ evt: 'append_anchor_probe_failed', tab: body.tab, appendRange: body.appendRange, ts: Date.now() }));
+            }
+          }
+
+          const result = await sheetsAppend(env, token, body.tab, body.values, body.appendRange);
+
+          if (body.appendRange) {
+            const targetRow = parseTargetRow(result.updates && result.updates.updatedRange);
+            const expectedTargetRow = anchorRow !== null ? anchorRow + 1 : null;
+            const drift = (targetRow !== null && expectedTargetRow !== null)
+              ? targetRow - expectedTargetRow
+              : null;
+
+            console.log(JSON.stringify({
+              evt: 'append_ok',
+              tab: body.tab,
+              appendRange: body.appendRange,
+              anchor_row: anchorRow,
+              target_row: targetRow,
+              expected_target_row: expectedTargetRow,
+              drift: drift,
+              ts: Date.now(),
+            }));
+
+            if (drift !== null && drift > 0) {
+              console.log(JSON.stringify({
+                evt: 'append_drift',
+                tab: body.tab,
+                appendRange: body.appendRange,
+                anchor_row: anchorRow,
+                target_row: targetRow,
+                expected_target_row: expectedTargetRow,
+                drift: drift,
+                ts: Date.now(),
+              }));
+            }
+          }
+
           return json({ ok: true, result }, env);
         } else if (mode === 'update') {
           if (!body.range) {
@@ -354,6 +499,9 @@ export default {
         const body = await request.json();
         if (!body.tab || !body.row || !body.col) {
           return errorJson('Missing tab, row, or col', env, 400);
+        }
+        if (!isKnownTab(body.tab)) {
+          return errorJson('Unknown tab: ' + body.tab, env, 400);
         }
         const a1 = colNumToA1(body.col) + body.row;
         const result = await sheetsUpdate(env, token, body.tab, a1, [[body.value ?? '']]);
